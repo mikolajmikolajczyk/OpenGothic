@@ -1,4 +1,17 @@
 #include "workers.h"
+#include <cstdlib>
+#include <cstdio>
+
+#if defined(__PS4__)
+#include <orbis/libkernel.h>
+// ⚠ ps4_log AND NOT ac_orbis_note. This used to hand-declare `extern "C" void ac_orbis_note(const
+// char*)` - a symbol private to Mesa's PS4 arm (ac_orbis_drm.c) - from game code, with no header
+// between them. Game code reaching into the graphics driver for a log channel is backwards, and a
+// hand-written declaration means a signature change upstream is a link error at best.
+//
+// ps4_log is the overlay's channel and what the rest of the port already uses.
+#include "ps4_app.h"
+#endif
 #include "utils/string_frm.h"
 
 #include <Tempest/Platform>
@@ -97,6 +110,68 @@ Workers &Workers::inst() {
 
 uint8_t Workers::maxThreads() {
   int32_t th = int32_t(std::thread::hardware_concurrency());
+#if defined(__PS4__)
+  /* ⚠ hardware_concurrency() RETURNS 1 ON THIS CONSOLE. Measured, not assumed - it was printed to
+   * the driver's log and read back.
+   *
+   * The standard permits that: the function is a hint and may return 0 when the answer is unknown.
+   * The consequence here is not a hint. Every parallelFor and parallelTasks in this title has been
+   * running SERIALLY on the calling thread for the whole life of the PS4 port, on a machine with
+   * six cores available to it. Animation alone was 27.2 ms of a 61.6 ms frame while the entire
+   * process burned 0.87 cores; those two numbers could only ever be reconciled this way.
+   *
+   * The kernel knows the real answer. scePthreadGetaffinity reports which cores this process may
+   * run on, which is the question that actually matters - not how many the chip has, but how many
+   * this title is allowed. The mask is logged either way, because a wrong answer here would quietly
+   * oversubscribe rather than fail.
+   *
+   * ⚠ AND THIS TURNS ON CONCURRENCY THAT HAS NEVER RUN HERE. If OpenGothic's parallel sections
+   * carry a latent race, this is the change that wakes it. That is a reason to watch for new
+   * misbehaviour, not a reason to stay serial on six cores. */
+  /* ⚠ AND NOTHING HERE ASKS FOR A STACK SIZE, deliberately. This block used to rewrite the pool
+   * onto pthread_create purely to request 1 MB, because std::thread cannot. orbis-compat's
+   * pthread_create interposer raises anything below the MAIN THREAD's stack, which is 2048 KiB
+   * here - so the 1 MB request was itself being raised, and a plain std::thread reaches the same
+   * 2 MB by the same path. Confirmed on hardware: "16 created, 16 raised to 2048 KiB". */
+  {
+  uint64_t mask = 0;
+  scePthreadGetaffinity(scePthreadSelf(), &mask);
+  const int cores = __builtin_popcountll(mask);
+
+  static bool said = false;
+  if(!said) {
+    char buf[192];
+    snprintf(buf,sizeof(buf),
+             "Workers: hardware_concurrency() = %d (a lie on this console), affinity mask 0x%llx = "
+             "%d cores, MAX_THREADS = %d",
+             int(th), (unsigned long long)mask, cores, int(MAX_THREADS));
+    ps4_log("%s",buf);
+    said = true;
+    }
+
+  if(cores>th)
+    th = cores;
+
+  /* ⚠ AND THE NUMBER HAS TO BE A KNOB, because six was not better than one.
+   *
+   * Animation did fall from 27.2 ms to 9.5 - the pool works - but the frame went from 61.6 ms to
+   * 77.2, because the GPU's own time grew by about 15 ms at the same moment. Six Jaguar cores
+   * working flat out compete with the GPU for the same memory, and on this port every surface the
+   * GPU touches is on the CACHE-COHERENT bus, which is the one the CPUs are on.
+   *
+   * So the useful measurement is the curve, not the endpoint: OG_WORKERS=1,2,3,4,6 says where the
+   * two costs cross. Unset means whatever the kernel allows. */
+  if(const char* w = getenv("OG_WORKERS")) {
+    const int n = atoi(w);
+    if(n>0) {
+      th = n;
+      char buf[96];
+      snprintf(buf,sizeof(buf),"Workers: OG_WORKERS=%d overrides the pool size",n);
+      ps4_log("%s",buf);
+      }
+    }
+  }
+#endif
   if(th<=0)
     th = 1;
   if(th>MAX_THREADS)

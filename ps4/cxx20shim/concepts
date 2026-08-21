@@ -1,0 +1,16 @@
+// Stands in for the OpenOrbis SDK's <concepts>, which is a synopsis-only stub in libc++ 11: the
+// header exists, declares nothing, and every `std::same_as` in ZenKit is an error. Found ahead of
+// the SDK's copy by -I on this directory. NOT a product fix - see ps4_cxx20_shim.h.
+//
+// ⚠ ONE LINE ON PURPOSE. The definitions used to be duplicated here verbatim from
+// ps4_cxx20_shim.h under a DIFFERENT include guard, so a TU that got the force-include and then
+// wrote `#include <concepts>` compiled both copies and failed with 21 redefinitions. Concepts
+// cannot be redeclared, and two guards whose only job is to prevent that cannot do it while they
+// are not the same guard. Reproduced in one command:
+//
+//   clang++ -std=c++20 -fsyntax-only -I ps4/cxx20shim \
+//           -include ps4/cxx20shim/ps4_cxx20_shim.h tu.cpp
+//
+// It built only because nothing in the tree includes <concepts> directly today - and ZenKit, the
+// reason this shim exists at all, is exactly what would start.
+#include "ps4_cxx20_shim.h"

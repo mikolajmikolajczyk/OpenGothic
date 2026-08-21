@@ -160,7 +160,23 @@ void Resources::loadVdfs(const std::vector<std::u16string>& modvdfs, bool modFil
       if(i.name.find(u"Speech")!=std::string::npos)
         continue;
 #endif
+#if defined(__PS4__)
+      // ⚠ LAZY, AND IT IS NOT AN OPTIMISATION - IT IS THE ONLY MODE THAT FITS.
+      //
+      // The default is VfsMountMode::FULL, which mmaps each archive WHOLE and keeps the mapping
+      // alive in Vfs::_m_data_mapped for the life of the process. PS4 mmap POPULATES EAGERLY -
+      // measured at 37 s to touch three bytes of a 722 MB archive - so FULL faults ~2.69 GiB of
+      // Gothic II into a process that has 387 MiB of flexible memory. It sometimes survives that
+      // and sometimes takes the whole console down with no pad and no log, which is what the
+      // evening of 2026-08-20 was spent bisecting before the binaries turned out to be identical.
+      //
+      // LAZY preads the catalog, keeps one shared fd per archive and reads entries on demand. The
+      // branch has been compiled in all along (_ZK_WITH_PREAD=1) and nothing ever asked for it.
+      inst->gothicAssets.mount_disk(i.name, zenkit::VfsOverwriteBehavior::OLDER,
+                                    zenkit::VfsMountMode::LAZY);
+#else
       inst->gothicAssets.mount_disk(i.name, zenkit::VfsOverwriteBehavior::OLDER);
+#endif
       }
     catch(const zenkit::VfsBrokenDiskError& err) {
       Log::e("unable to load archive: \"", TextCodec::toUtf8(i.name), "\", reason: ", err.what());

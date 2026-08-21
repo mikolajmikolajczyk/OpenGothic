@@ -1,5 +1,9 @@
 #include "gamemenu.h"
 
+#if defined(__PS4__)
+#include "og_ps4_ime.h"
+#endif
+
 #include <Tempest/Painter>
 #include <Tempest/Log>
 #include <Tempest/TextCodec>
@@ -219,16 +223,79 @@ struct GameMenu::SavNameDialog : Dialog {
     setFocusPolicy(ClickFocus);
     setCursorShape(CursorShape::Hidden);
     setFocus(true);
+#if defined(__PS4__)
+    // A console has no keyboard, so keyUpEvent below never fires and every savegame is named with
+    // the bare cursor this dialog draws. The system panel is the input device; this dialog stays
+    // exactly as it is for the case where a USB keyboard IS attached, and both paths write the
+    // same `text`.
+    imeUp = Ps4Og::imeBegin(text);
+    if(!imeUp)
+      // Not fatal and not silent: the save still happens with whatever name the slot had, and
+      // og_ps4_ime.cpp has already logged which call refused.
+      Tempest::Log::i("savegame name: the on-screen keyboard could not be raised - the name is "
+                      "unchanged");
+#endif
     }
 
   void mouseDownEvent(MouseEvent& e) override { e.accept(); }
-  void mouseUpEvent  (MouseEvent&) override {
+  void mouseUpEvent  (MouseEvent& e) override {
+#if defined(__PS4__)
+    if(imeUp) {
+      // See keyUpEvent.
+      e.accept();
+      return;
+      }
+#endif
+    (void)e;
     close();
     accepted = true;
     }
 
   void keyDownEvent(KeyEvent &e) override { e.accept(); }
   void keyUpEvent  (KeyEvent &e) override {
+#if defined(__PS4__)
+    if(imeUp) {
+      // WHILE THE SYSTEM PANEL IS UP THIS DIALOG MUST NOT INTERPRET INPUT AT ALL, and the first
+      // console run showed why in the crudest possible way: the cursor appeared for a moment, the
+      // dialog closed with accepted=true, and the save went out with an empty name.
+      //
+      // The cause is the press that OPENED this dialog. The menu acts on the key DOWN, the dialog
+      // is constructed, and the matching key UP - K_Return, because KeyCodec maps cross to it -
+      // arrives at the brand-new dialog, which reads it as "the user pressed Enter" and accepts an
+      // empty name. A stale half of one button press.
+      //
+      // Swallowing every event instead of only the first is deliberate: the panel is the input
+      // device now, so a pad press belongs to IT and nothing this dialog could do with one is
+      // right. If the panel failed to raise, `imeUp` is false and the keyboard path below is
+      // unchanged - a USB keyboard still works and so does the stale-up behaviour, which then
+      // costs only the name it was already going to cost.
+      //
+      // ⚠ ONE EXCEPTION, AND IT IS THE ESCAPE HATCH. Escape is let through, because swallowing
+      // EVERYTHING means the only way out of this dialog is the panel answering - and on 2026-08-20
+      // the review found that a panel reporting STATUS_NONE never answers at all. imePoll now gives
+      // up after ~6 s, which is the real fix; this is the half a player can reach immediately, and
+      // it costs nothing because the panel owns the pad anyway - an Escape here can only have come
+      // from a USB keyboard, which is exactly the case where the panel is not the input device.
+      if(e.key==Event::K_ESCAPE) {
+        Tempest::Log::i("savegame name: escape while the system keyboard is up - closing the panel "
+                        "and the dialog, the name is unchanged");
+        Ps4Og::imeEnd();
+        imeUp = false;
+        text  = text0;
+        e.accept();
+        close();
+        return;
+        }
+      if(!saidSwallow) {
+        saidSwallow = true;
+        Tempest::Log::i("savegame name: input goes to the system keyboard while it is up "
+                        "(the first event swallowed was the key-up of the press that opened this "
+                        "dialog, which used to accept an empty name)");
+        }
+      e.accept();
+      return;
+      }
+#endif
     update();
 
     if(e.key==Event::K_ESCAPE) {
@@ -255,13 +322,57 @@ struct GameMenu::SavNameDialog : Dialog {
     text = text + ch;
     }
 
-  void paintEvent (PaintEvent&) override {}
+  void paintEvent (PaintEvent&) override {
+#if defined(__PS4__)
+    // POLLED FROM paintEvent because it is the one hook that runs every frame for as long as
+    // exec() does, and because the panel has to be polled from a thread that keeps FLIPPING: the
+    // ps4/ime demo established that the system composites it over the title's own VideoOut, and
+    // always with the title still drawing. A blocking loop here would stop the flip and test
+    // something nobody has measured.
+    if(imeUp) {
+      ++polls;
+      std::string got;
+      const auto st = Ps4Og::imePoll(got);
+      if(st==Ps4Og::ImeState::Accepted) {
+        text     = got;
+        accepted = true;
+        imeUp    = false;
+        close();
+        } else
+      if(st==Ps4Og::ImeState::Cancelled) {
+        text  = text0;
+        imeUp = false;
+        close();
+        }
+      }
+#endif
+    }
   void paintShadow(PaintEvent&) override {}
+
+#if defined(__PS4__)
+  ~SavNameDialog() override {
+    // If exec() is left by any route other than the panel answering - a close() from elsewhere,
+    // an exception - the panel must not be left standing: it would be the one dialog this process
+    // is allowed and nothing would ever release it.
+    if(imeUp)
+      Ps4Og::imeEnd();
+    if(polls==0)
+      // The only way this dialog can hang: paintEvent is the pump, so zero calls means the panel
+      // was never polled and the user was looking at a keyboard nothing was listening to.
+      Tempest::Log::i("savegame name: paintEvent never ran, so the keyboard was never polled - "
+                      "the pump is in the wrong place");
+    }
+#endif
 
   std::string& text;
   std::string  text0;
 
   bool         accepted = false;
+#if defined(__PS4__)
+  bool         imeUp       = false;
+  bool         saidSwallow = false;
+  uint32_t     polls       = 0;
+#endif
   };
 
 GameMenu::GameMenu(MenuRoot &owner, KeyCodec& keyCodec, zenkit::DaedalusVm& vm, std::string_view menuSection, KeyCodec::Action kClose)

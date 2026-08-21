@@ -1,0 +1,76 @@
+# /data/tempest-env.txt — the driver's knobs, without a rebuild
+#
+# The RADV title reads this file as the FIRST thing after ps4_app_init and setenv()s every line, overriding the
+# defaults compiled into the binary. Every applied line is echoed to the title's log, and so is the file's absence.
+#
+# WHY IT EXISTS: this hunt has spent nine console trips, and most of them were a rebuild, a repackage and a reflash
+# to change one string. With this file the next experiment is:
+#
+#     lftp -p 2121 192.168.100.2 -e "cd /data; put tempest-env.txt; bye"
+#
+# Syntax: KEY=VALUE, one per line. Blank lines and lines starting with # are ignored, and whitespace around both
+# sides of the '=' is trimmed — a trailing space in "7:314 " would otherwise read as a different experiment.
+#
+# THE KNOBS THIS PORT UNDERSTANDS
+#   ORBIS_DRM_TRACE=1         the PS4 arm's own trace (submissions, stages, waits)
+#   MESA_LOG_FILE=<path>      where mesa_log writes; WITHOUT IT THE DRIVER IS MUTE (stderr is lost on this console)
+#   MESA_LOG_LEVEL=info       anything below info hides the trace above
+#   RADV_DEBUG=info,nohiz     RADV's own flags; nohiz allocates no HTILE
+#   ORBIS_DUMP_SUBMIT=<n>     hexdump submission n and the IBs it chains to (0 = every one, which is a lot)
+#   ORBIS_TRUNCATE=<n>:<dw>   cut submission n to dw dwords and still append the fence. THE CUT MUST LAND ON A
+#                             PACKET BOUNDARY — take the offset from an UNTRUNCATED dump of the same build
+#   ORBIS_3D_LINEAR=1         3D images become LINEAR_ALIGNED - no micro or macro tiling at all
+#   ORBIS_NO_TESS=1           do not advertise tessellation. Two sites read it - tessellationShader
+#                             and multiviewTessellationShader - and RADV's own comment there records
+#                             that this "HAD BEEN HALF A SWITCH, and two runs died on the half it
+#                             did not cover"
+#   ORBIS_CMASK=1             put single-sample CMASK back (it faults this GPU)
+#   ORBIS_TILE_MODE=1d        clamp 2D tiling to 1D (2D surfaces only)
+#   ORBIS_ARENA_MIB=<n>       the direct-memory arena's size, for when an allocation is refused
+#   ORBIS_TRACE_SUBMITS=<n>   trace the first n submissions through every stage; 0 = every one
+#   ORBIS_SCAN_VA=<dw>[:<mask>][,...]  scan every mapped BO for that dword and print "handle H offset O".
+#                             Up to 8 comma-separated patterns in one pass; a mask compares only those bits
+#   ORBIS_SCAN_EVERY=<n>      scan before every nth submission (512 by default)
+#   ORBIS_SCAN_AT=<n>         scan before submission n only, instead of a stride
+#   ORBIS_SCAN_MAX_MIB=<n>    how much a scan may read (256). WHAT IT SKIPPED IS PRINTED - read that field
+#   ORBIS_TRACE_BOS=1         print every mapping's VA range once, so a faulting address can be placed
+#
+# ⚠ EVERY NAME ABOVE WAS CHECKED FOR A READER ON 2026-08-21, and three did not have one:
+# ORBIS_NO_PREFETCH, ORBIS_MAX_INSTANCES and TEMPEST_PS4_KBD were documented here with results and
+# warnings attached, and nothing anywhere read them. A file that tells an operator to set a line
+# that does nothing is worse than one that omits it: the run comes back clean and reads as a
+# measurement. Re-run the check when adding a knob - `grep -rl 'getenv("NAME")' src/` in mesa-ps4.
+#
+# ⚠ TWO OF THESE ARE NOT OPTIONS. ORBIS_3D_LINEAR=1 and ORBIS_NO_TESS=1 are the configuration this
+# port runs on, and BOTH are off in the driver unless this file turns them on:
+#
+#     ac_surface.c            getenv("ORBIS_3D_LINEAR")
+#     radv_physical_device.c  .tessellationShader AND .multiviewTessellationShader, two sites - the
+#                             driver's own comment there records that ORBIS_NO_TESS "HAD BEEN HALF A
+#                             SWITCH, and two runs died on the half it did not cover"
+#
+# Cutting this file down to "only what the run needs" drops them, and the title then loads and
+# crashes on entering 3D - measured 2026-08-19, twice, same binary, only this file different. The
+# rule about keeping the env file minimal is about DIAGNOSTIC knobs. These two are not that.
+
+# ---------------------------------------------------------------- THE CONFIGURATION, not a suggestion
+# These two are the whole reason this file has to exist on the console. Both are OFF in the driver
+# unless a line here turns them on, and without them the title loads and then dies on entering 3D.
+# Copy this file as it stands and the console runs; delete either line and it does not.
+#
+# ⚠ THIS SECTION USED TO BE EMPTY, and the warning above it said these two were mandatory. So the
+# example file shipped neither of the knobs it called mandatory, and the only line it DID carry was
+# a diagnostic hexdump. Anyone copying it verbatim got exactly the crash the warning describes.
+ORBIS_3D_LINEAR=1
+ORBIS_NO_TESS=1
+
+# ---------------------------------------------------------------- diagnostics: all OFF by default
+# Nothing here is needed for a normal run. The title turns no driver knob on by itself - this file is
+# how any of them is turned on, and an absent file means a clean run. Uncomment one at a time.
+#
+# Hexdump submission 7 and the IBs it chains to. Was ON in this example for months, which is the
+# inversion main.cpp's own comment argues against: a title that ships diagnostics enabled.
+# ORBIS_DUMP_SUBMIT=7
+#
+# A: re-confirm the cut that started the stall hunt. Offsets must come from an UNTRUNCATED dump of the same build.
+# ORBIS_TRUNCATE=7:307
