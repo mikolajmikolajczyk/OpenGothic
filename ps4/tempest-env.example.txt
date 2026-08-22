@@ -64,6 +64,16 @@
 ORBIS_3D_LINEAR=1
 ORBIS_NO_TESS=1
 
+# ⚠ AND THE LOG NEEDS A NAME OF ITS OWN, which this file warns about further down and then did not
+# do. The copy on the console carried MESA_LOG_FILE=/data/deqp-mesa-default.log - a deqp name, on a
+# title - and the title run of 2026-08-23 overwrote 4.3 MB of CTS baseline with it. Nothing failed;
+# a baseline simply stopped existing.
+#
+# Without this line the driver is MUTE: stderr goes nowhere on this console, so a run that goes
+# wrong leaves no account of itself at all.
+MESA_LOG_FILE=/data/og-mesa.log
+MESA_LOG_LEVEL=info
+
 # ---------------------------------------------------------------- diagnostics: all OFF by default
 # Nothing here is needed for a normal run. The title turns no driver knob on by itself - this file is
 # how any of them is turned on, and an absent file means a clean run. Uncomment one at a time.

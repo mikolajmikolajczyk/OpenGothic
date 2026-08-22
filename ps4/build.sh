@@ -26,13 +26,26 @@ WORK="${HOME}/.cache/opengothic-ps4"
 JOBS="$(nproc)"
 SOUND_NULL=OFF
 # The platform overlay: the toolchain file, the SDK corrections, the Vulkan C ABI and the log
-# channel. Overridable because a fresh clone may not be where this default says.
-ORBIS_COMPAT="${ORBIS_COMPAT_DIR:-${HOME}/src-ps4/orbis-compat}"
+# channel.
+#
+# ⚠ The six lines that cannot be shared - see orbis-compat/scripts/ps4/orbis-env.sh. Sibling
+# directory before the old personal default, because that is what a fresh clone of the orbis-ports
+# organisation looks like: the repositories next to each other.
+for _c in "${ORBIS_COMPAT_DIR:-}" "$(dirname "${BASH_SOURCE[0]}")/../../orbis-compat" "${HOME}/src-ps4/orbis-compat"; do
+  [[ -n "$_c" && -f "$_c/scripts/ps4/orbis-env.sh" ]] && { ORBIS_COMPAT_DIR="$_c"; break; }
+done
+[[ -n "${ORBIS_COMPAT_DIR:-}" ]] || {
+  echo "!! orbis-compat not found - clone https://github.com/orbis-ports/orbis-compat next to this" >&2
+  echo "   repository, or set ORBIS_COMPAT_DIR / pass --orbis-compat <dir>" >&2
+  exit 1
+}
+. "${ORBIS_COMPAT_DIR}/scripts/ps4/orbis-env.sh"
+ORBIS_COMPAT="${ORBIS_COMPAT_DIR}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --work) WORK="$2"; shift 2 ;;
-    --orbis-compat) ORBIS_COMPAT="$2"; shift 2 ;;
+    --orbis-compat) ORBIS_COMPAT="$2"; ORBIS_COMPAT_DIR="$2"; export ORBIS_COMPAT_DIR; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     # The silent control rung. Not a fallback for when something sounds wrong: it is the build that
     # separates "the defect is in the audio path" from "the defect is beside it".
@@ -85,10 +98,19 @@ grep -q "VfsMountMode" "${ROOT}/lib/ZenKit/include/zenkit/Vfs.hh" 2>/dev/null ||
 # fetches its test framework.
 mkdir -p "${BUILD}"
 
+# ⚠ THE DRIVER IS PASSED, NOT LEFT TO A DEFAULT. vkloader/CMakeLists.txt defaults
+# ORBIS_MESA_BUILD to ~/.cache/orbis-mesa/mesa/build-orbis - the patch-queue era's path, which on
+# 2026-08-23 still held a driver from the previous day. Nothing announced it; the title would simply
+# have linked the wrong RADV and every measurement taken from the run would have been about changes
+# it did not contain. orbis-env.sh resolves the checkout; this prints what it found.
+orbis_announce_driver
+
 echo "== configuring ${BUILD}"
 cmake -S "${ROOT}" -B "${BUILD}" \
       -DCMAKE_TOOLCHAIN_FILE="${ORBIS_COMPAT}/cmake/ps4-openorbis.cmake" \
       -DORBIS_COMPAT_DIR="${ORBIS_COMPAT}" \
+      -DORBIS_MESA_BUILD="${ORBIS_MESA_BUILD}" \
+      -DORBIS_MESA_SRC="${ORBIS_MESA_DIR}" \
       -DCMAKE_BUILD_TYPE=Release \
       -DPS4_BUILD_PKG=ON \
       -DZK_BUILD_TESTS=OFF \
