@@ -1,6 +1,6 @@
 [submodule "lib/Tempest"]
 	path = lib/Tempest
-	url = https://github.com/mikolajmikolajczyk/Tempest.git
+	url = https://github.com/orbis-ports/Tempest.git
 	branch = ps4-support
 [submodule "lib/bullet3"]
 	path = lib/bullet3
@@ -10,7 +10,7 @@
 	url = https://github.com/schellingb/TinySoundFont.git
 [submodule "lib/ZenKit"]
 	path = lib/ZenKit
-	url = https://github.com/mikolajmikolajczyk/ZenKit.git
+	url = https://github.com/orbis-ports/ZenKit.git
 	branch = ps4-support
 [submodule "lib/dmusic"]
 	path = lib/dmusic
